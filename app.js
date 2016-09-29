@@ -5,8 +5,8 @@ const req = require('tiny_request');
 const InputFile = require('telegram-node-bot/lib/api/InputFile');
 
 const macApiUrl = 'http://orangepl-test.noriginmedia.com/mac-api/proxy/';
+const sessionHeaderKey = 'X-Aspiro-TV-Session';
 const reqHeaders = {
-	'X-Aspiro-TV-Session': '03b31e6419a90bb807515f4188863609',
 	'Accept':'*/*',
 	'Accept-Encoding':'gzip, deflate, sdch',
 	'Accept-Language':'en-US,en;q=0.8,ru;q=0.6',
@@ -17,17 +17,53 @@ const reqHeaders = {
 	'User-Agent':'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.116 Safari/537.36'
 };
 
+const auth = () => {
+	req.get({
+		url: macApiUrl + 'orange-opl/anonymous',
+		query: {
+			appId: 'opl.orange.pc',
+			appVersion: '1.0'
+		},
+		headers: reqHeaders,
+		json: true
+	}, body => reqHeaders[sessionHeaderKey] = body.sessionId);
+};
+
 class List extends Ctrl {
-	get path() {
-		return 'epg?limit=9999&from=now&offset=-13h&duration=31h&transform=epg';
+	get query() {
+		return {
+			limit: 9999,
+			from: 'now',
+			offset: '-13h',
+			duration: '31h',
+			transform: 'epg'
+		};
+	}
+
+	get maxProgramsCount() {
+		return 3;
+	}
+
+	get ignoreFinishedPrograms() {
+		return true;
+	}
+
+	sliceFinishedPrograms(channels) {
+		if (this.ignoreFinishedPrograms) {
+			const now = Date.now();
+			return channels.map(channel => {
+				channel.schedules = channel.schedules.filter(schedule => schedule.end > now);
+				return channel;
+			});
+		} else {
+			return channels;
+		}
 	}
 
 	onSuccess($, results) {
-		const now = Date.now();
-		const channels = results.map(channel => {
+		const channels = this.sliceFinishedPrograms(results).map(channel => {
 			const schedulesInfo = channel.schedules
-					.filter(schedule => schedule.end > now)
-					.slice(0, 3)
+					.slice(0, this.maxProgramsCount)
 					.map(schedule => {
 						const startTime = new Date(schedule.start);
 						let hours = startTime.getHours();
@@ -48,7 +84,8 @@ class List extends Ctrl {
 
 	handle($) {
 		req.get({
-			url: macApiUrl + this.path,
+			url: macApiUrl + 'epg',
+			query: this.query,
 			headers: reqHeaders,
 			json: true
 		}, (body, response, err) => {
@@ -65,7 +102,7 @@ class Channels extends List {
 	onSuccess($, results) {
 		$.sendMessage('Select channel', {
 			reply_markup: JSON.stringify({
-				keyboard: results.map(channel => ['/e ' + channel.title]),
+				keyboard: this.sliceFinishedPrograms(results).map(channel => ['/e ' + channel.title]),
 				one_time_keyboard: true
 			})
 		});
@@ -75,7 +112,7 @@ class Channels extends List {
 class Epg extends List {
 	onSuccess($, results) {
 		const title = $.query[0];
-		const channel = results.find(channel => channel.title === title);
+		const channel = this.sliceFinishedPrograms(results).find(channel => channel.title === title);
 		const schedulesInfo = channel.schedules.map(schedule => {
 			const startTime = new Date(schedule.start);
 			let hours = startTime.getHours();
@@ -85,29 +122,37 @@ class Epg extends List {
 			return `*${hours}:${mins}* "${schedule.title}"`;
 		}).join('\n');
 
-		$.sendMessage(schedulesInfo, { parse_mode: "Markdown" });
+		$.sendMessage(schedulesInfo || 'No program info', { parse_mode: "Markdown" });
 	}
 }
 
 class Help extends Ctrl {
-	get availableCommands() {
-		return '' +
-			'`/h              `- show commands list\n' +
-			'`/l              `- show current programs list\n' +
-			'`/c              `- list of available channels\n' +
-			'`/e :channelName `- list of programs for specific channel\n' +
-			'`/s              `- search\n' +
-			'`/d :vodId       `- show VoD details';
+	getAvailableCommands($) {
+		const { _firstName: senderName, _lastName: senderSurname } = $.message.from;
+		return [
+			`Hello, *${senderName} ${senderSurname}*! I'm EBbot and I'm ready to help you with NoriginMedia Hybrid Apps!`,
+			'`/h                  `- show commands list',
+			'`/l                  `- show current programs list',
+			'`/c                  `- list of available channels',
+			'`/e :channel         `- list of programs for specific channel',
+			'`/f                  `- find video content',
+			'`/d :index           `- show video details',
+			'`/r :index           `- show related videos',
+			'`/w :channel :offset `- show related videos'
+		].join('\n');
 	}
 
 	handle($) {
-		$.sendMessage(this.availableCommands, { parse_mode: 'Markdown' });
+		$.sendMessage(this.getAvailableCommands($), { parse_mode: 'Markdown' });
 	}
 }
 
-class Search extends Ctrl {
-	get path() {
-		return 'search?forFields=title,description,metadata.castSearch.actor,metadata.castSearch.director&resultFormat=forFieldsFormat&for=';
+class Find extends Ctrl {
+	get query() {
+		return {
+			forFields: 'title,description,metadata.castSearch.actor,metadata.castSearch.director',
+			resultFormat: 'forFieldsFormat'
+		};
 	}
 
 	set filter(type) {
@@ -129,7 +174,8 @@ class Search extends Ctrl {
 
 	onSubmit($, { query }) {
 		req.get({
-			url: macApiUrl + this.path + query,
+			url: macApiUrl + 'search',
+			query: Object.assign(this.query, { for: query }),
 			headers: reqHeaders,
 			json: true
 		}, (body, response, err) => {
@@ -160,9 +206,9 @@ class Search extends Ctrl {
 
 	handle($) {
 		$.runMenu({
+			oneTimeKeyboard: true,
 			message: 'Select type of content',
 			options: {
-				one_time_keyboard: true,
 				parse_mode: 'Markdown'
 			},
 			vod: () => {
@@ -227,12 +273,87 @@ class Details extends Ctrl {
 	}
 }
 
+class Related extends Ctrl {
+	handle($) {
+		const vod = $.userSession.results[$.query.id];
+
+		if (vod && vod.id) {
+			if (vod.type === 'vod') {
+				req.get({
+					url: macApiUrl + vod.id + '/related',
+					headers: reqHeaders,
+					json: true
+				}, (body, response, err) => {
+					if (!err && response.statusCode === 200) {
+						this.onSuccess($, body && body.length ? body : []);
+					} else {
+						this.onError($, err);
+					}
+				});
+			} else {
+				$.sendMessage('Program cannot have related content');
+			}
+		} else {
+			$.sendMessage('The is no result for this VoD');
+		}
+	}
+
+	onSuccess($, results) {
+		const related = results
+				.map(vod => `*${vod.title}*${vod.metadata.releaseYear ? ' (' + vod.metadata.releaseYear + ')' : ''}`)
+				.join('\n');
+		$.sendMessage('`' + $.userSession.results[$.query.id].title + '` recommendataions\n' + related || 'No related found', {parse_mode: 'Markdown'});
+	}
+
+	onError($, err) {
+		$.sendMessage(err);
+	}
+}
+
+class TimeTable extends List {
+	get query() {
+		const leftUntilMidnight = this.offset > 0 ? (24 - new Date().getHours()) : -(new Date().getHours());
+		const offset = (24 * this.offset + leftUntilMidnight);
+		return {
+			limit: 9999,
+			from: 'now',
+			offset: offset + 'h',
+			duration: '24h',
+			transform: 'epg'
+		};
+	}
+
+	get maxProgramsCount() {
+		return undefined;
+	}
+
+	get ignoreFinishedPrograms() {
+		return false;
+	}
+
+	onSuccess($, results) {
+		super.onSuccess($, results.filter(channel => channel.title == $.query.id));
+	}
+
+	handle($) {
+		this.id = $.query.id;
+		this.offset = $.query.offset;
+		super.handle($);
+	}
+}
+
+auth();
+
+setInterval(auth, 15 * 1000 * 60);
+
 tg.router
 	.when('/start', new Help())
 	.when(/\/e\s?(.*)/, new Epg())
-	.when(/\/s\s?(.*)/, new Search())
+	.when('/f', new Find())
 	.when('/c', new Channels())
 	.when('/l', new List())
 	.when('/h', new Help())
 	.when('/d :id', new Details())
+	.when('/r :id', new Related())
+	.when('/w :id :offset', new TimeTable())
 	.otherwise(new Help());

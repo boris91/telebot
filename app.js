@@ -34,8 +34,8 @@ class List extends Ctrl {
 		return {
 			limit: 9999,
 			from: 'now',
-			offset: '-13h',
-			duration: '31h',
+			offset: -(new Date().getHours()) + 'h',
+			duration: '24h',
 			transform: 'epg'
 		};
 	}
@@ -62,20 +62,24 @@ class List extends Ctrl {
 
 	onSuccess($, results) {
 		const channels = this.sliceFinishedPrograms(results).map(channel => {
-			const schedulesInfo = channel.schedules
-					.slice(0, this.maxProgramsCount)
-					.map(schedule => {
-						const startTime = new Date(schedule.start);
-						let hours = startTime.getHours();
-						hours = hours < 10 ? '0' + hours : hours;
-						let mins = startTime.getMinutes();
-						mins = mins < 10 ? '0' + mins : mins;
-						return `*${hours}:${mins}* "${schedule.title}"`;
-					}).join('\n');
-			return '`' + channel.title + '`\n' + (schedulesInfo || "No program info");
+			if (channel.schedules) {
+				const schedulesInfo = channel.schedules
+						.slice(0, this.maxProgramsCount)
+						.map(schedule => {
+							const startTime = new Date(schedule.start);
+							let hours = startTime.getHours();
+							hours = hours < 10 ? '0' + hours : hours;
+							let mins = startTime.getMinutes();
+							mins = mins < 10 ? '0' + mins : mins;
+							return `<b>${hours}:${mins}</b> ${schedule.title}`;
+						}).join('\n');
+				return '<code>' + channel.title + '</code>\n' + (schedulesInfo || "No program info");
+			} else {
+				return '<code>No schedules</code>';
+			}
 		}).join('\n\n');
 
-		$.sendMessage(channels || 'No EPG found', { parse_mode: 'Markdown' });
+		$.sendMessage(channels || 'No EPG found', { parse_mode: 'HTML' });
 	}
 
 	onError($, err) {
@@ -119,10 +123,10 @@ class Epg extends List {
 			hours = hours < 10 ? '0' + hours : hours;
 			let mins = startTime.getMinutes();
 			mins = mins < 10 ? '0' + mins : mins;
-			return `*${hours}:${mins}* "${schedule.title}"`;
+			return `<b>${hours}:${mins}</b> "${schedule.title}"`;
 		}).join('\n');
 
-		$.sendMessage(schedulesInfo || 'No program info', { parse_mode: "Markdown" });
+		$.sendMessage(schedulesInfo || 'No program info', { parse_mode: "HTML" });
 	}
 }
 
@@ -138,7 +142,7 @@ class Help extends Ctrl {
 			'`/f                  `- find video content',
 			'`/d :index           `- show video details',
 			'`/r :index           `- show related videos',
-			'`/w :channel :offset `- show related videos'
+			'`/w :channel :offset `- show programs from day offset'
 		].join('\n');
 	}
 
@@ -195,9 +199,9 @@ class Find extends Ctrl {
 					$.userSession.results.push(result);
 					return result;
 				})
-				.map((result, index) => '*' + index + '*' + ' "' + result.title + '"`(' + result.occurences + ')`')
+				.map((result, index) => '<b>' + index + '</b>' + ' "' + result.title + '"<code>(' + result.occurences + ')</code>')
 				.join('\n');
-		$.sendMessage(message || 'No occurence found', { parse_mode: 'Markdown' });
+		$.sendMessage(message || 'No occurence found', { parse_mode: 'HTML' });
 	}
 
 	onError($, err) {
@@ -255,8 +259,8 @@ class Details extends Ctrl {
 		const year = vod.metadata.releaseYear;
 		const yearAndDuration = year && duration ? ` (${year}, ${durHours}:${durMins})` : '';
 
-		let vodData = `*${title}*${yearAndDuration}\n` + description;
-		$.sendMessage(vodData || 'No occurence found', {parse_mode: 'Markdown'});
+		let vodData = `<b>${title}</b>${yearAndDuration}\n` + description;
+		$.sendMessage(vodData || 'No occurence found', {parse_mode: 'HTML'});
 
 		const vodImgUrl = vod.images["APP_SLSHOW_3"];
 		if (vodImgUrl) {
@@ -300,9 +304,9 @@ class Related extends Ctrl {
 
 	onSuccess($, results) {
 		const related = results
-				.map(vod => `*${vod.title}*${vod.metadata.releaseYear ? ' (' + vod.metadata.releaseYear + ')' : ''}`)
+				.map(vod => `<b>${vod.title}</b>${vod.metadata.releaseYear ? ' (' + vod.metadata.releaseYear + ')' : ''}`)
 				.join('\n');
-		$.sendMessage('`' + $.userSession.results[$.query.id].title + '` recommendataions\n' + related || 'No related found', {parse_mode: 'Markdown'});
+		$.sendMessage('<code>' + $.userSession.results[$.query.id].title + '</code> recommendataions\n' + related || 'No related found', {parse_mode: 'HTML'});
 	}
 
 	onError($, err) {
@@ -332,12 +336,14 @@ class TimeTable extends List {
 	}
 
 	onSuccess($, results) {
-		super.onSuccess($, results.filter(channel => channel.title == $.query.id));
+		super.onSuccess($, results.filter(channel => channel.title == this.id));
 	}
 
 	handle($) {
-		this.id = $.query.id;
-		this.offset = $.query.offset;
+		const params = $.query[0];
+		const spaceIndex = params.lastIndexOf(" ");
+		this.id = params.substr(0, spaceIndex);
+		this.offset = params.substr(spaceIndex + 1, params.length);
 		super.handle($);
 	}
 }
@@ -355,5 +361,5 @@ tg.router
 	.when('/h', new Help())
 	.when('/d :id', new Details())
 	.when('/r :id', new Related())
-	.when('/w :id :offset', new TimeTable())
+	.when(/\/w\s?(.*)/, new TimeTable())
 	.otherwise(new Help());

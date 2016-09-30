@@ -1,32 +1,26 @@
 const Telegram = require('telegram-node-bot');
-const Ctrl = Telegram.TelegramBaseController;
-const tg = new Telegram.Telegram('252731600:AAHEfZxF0BA1_gyC4k3TfXd3AkaLcLHhOgs');
 const req = require('tiny_request');
+const config = require('./config');
 const InputFile = require('telegram-node-bot/lib/api/InputFile');
 
-const macApiUrl = 'http://orangepl-test.noriginmedia.com/mac-api/proxy/';
-const sessionHeaderKey = 'X-Aspiro-TV-Session';
 const reqHeaders = {
 	'User-Agent': 'Telegram Bot SDK'
 };
 
 const auth = () => {
 	req.get({
-		url: macApiUrl + 'orange-opl/anonymous',
-		query: {
-			appId: 'opl.orange.pc',
-			appVersion: '1.0'
-		},
+		url: config.apiUrl + config.anonymousAuthPath,
+		query: config.anonymousAuthQueryParams,
 		headers: reqHeaders,
 		json: true
 	}, body => {
 		if (body) {
-			reqHeaders[sessionHeaderKey] = body.sessionId;
+			reqHeaders[config.sessionHeaderKey] = body.sessionId;
 		}
 	});
 };
 
-class List extends Ctrl {
+class List extends Telegram.TelegramBaseController {
 	get query() {
 		return {
 			limit: 9999,
@@ -88,7 +82,7 @@ class List extends Ctrl {
 
 	handle($) {
 		req.get({
-			url: macApiUrl + 'epg',
+			url: config.apiUrl + config.epgPath,
 			query: this.query,
 			headers: reqHeaders,
 			json: true
@@ -117,28 +111,19 @@ class Epg extends List {
 	onSuccess($, results) {
 		const title = $.query[0];
 		const channel = this.sliceFinishedPrograms(results).find(channel => channel.title === title);
-		const schedulesInfo = channel.schedules
-				.map(this.formatScheduleInfo)
-				.join('\n');
+		const schedulesInfo = channel && channel.schedules &&
+				channel.schedules.map(this.formatScheduleInfo).join('\n');
 
-		$.sendMessage('<code>' + channel.title + '</code>\n' + (schedulesInfo || 'No program info'), { parse_mode: "HTML" });
+		$.sendMessage((channel ? '<code>' + channel.title + '</code>\n' : '') + (schedulesInfo || 'No program info'), { parse_mode: "HTML" });
 	}
 }
 
-class Help extends Ctrl {
+class Help extends Telegram.TelegramBaseController {
 	getAvailableCommands($) {
 		const { _firstName: senderName, _lastName: senderSurname } = $.message.from;
 		return [
-			`Hello, *${senderName} ${senderSurname}*! I'm EBbot and I'm ready to help you with NoriginMedia Hybrid Apps!`,
-			'`/h                  `- show commands list',
-			'`/l                  `- show current programs list',
-			'`/c                  `- list of available channels',
-			'`/e :channel         `- list of programs for specific channel',
-			'`/f                  `- find video content',
-			'`/d :index           `- show video details',
-			'`/r :index           `- show related videos',
-			'`/w :channel :offset `- show programs from day offset'
-		].join('\n');
+			`Hello, *${senderName} ${senderSurname}*! I'm EBbot and I'm ready to help you with NoriginMedia Hybrid Apps!`
+		].concat(config.commandsList).join('\n');
 	}
 
 	handle($) {
@@ -146,12 +131,16 @@ class Help extends Ctrl {
 	}
 }
 
-class Find extends Ctrl {
+class WrongCommand extends Help {
+	handle($) {
+		$.sendMessage('`Please, do not send me not registered commands!`\n\n', { parse_mode: 'Markdown' });
+		super.handle($);
+	}
+}
+
+class Find extends Telegram.TelegramBaseController {
 	get query() {
-		return {
-			forFields: 'title,description,metadata.castSearch.actor,metadata.castSearch.director',
-			resultFormat: 'forFieldsFormat'
-		};
+		return config.searchQueryParams;
 	}
 
 	set filter(type) {
@@ -173,7 +162,7 @@ class Find extends Ctrl {
 
 	onSubmit($, { query }) {
 		req.get({
-			url: macApiUrl + 'search',
+			url: config.apiUrl + config.searchPath,
 			query: Object.assign(this.query, { for: query }),
 			headers: reqHeaders,
 			json: true
@@ -194,7 +183,7 @@ class Find extends Ctrl {
 					$.userSession.results.push(result);
 					return result;
 				})
-				.map((result, index) => '<b>' + index + '</b>' + ' "' + result.title + '"<code>(' + result.occurences + ')</code>')
+				.map((result, index) => '<b>' + index + '</b>' + ' ' + result.title + ' <code>(' + result.occurences + ')</code>')
 				.join('\n');
 		$.sendMessage(message || 'No occurence found', { parse_mode: 'HTML' });
 	}
@@ -222,13 +211,13 @@ class Find extends Ctrl {
 	}
 }
 
-class Details extends Ctrl {
+class Details extends Telegram.TelegramBaseController {
 	handle($) {
 		const vod = $.userSession.results[$.query.id];
 
 		if (vod && vod.id) {
 			req.get({
-				url: macApiUrl + vod.id,
+				url: config.apiUrl + vod.id,
 				headers: reqHeaders,
 				json: true
 			}, (body, response, err) => {
@@ -272,14 +261,14 @@ class Details extends Ctrl {
 	}
 }
 
-class Related extends Ctrl {
+class Related extends Telegram.TelegramBaseController {
 	handle($) {
 		const vod = $.userSession.results[$.query.id];
 
 		if (vod && vod.id) {
 			if (vod.type === 'vod') {
 				req.get({
-					url: macApiUrl + vod.id + '/related',
+					url: config.apiUrl + vod.id + '/related',
 					headers: reqHeaders,
 					json: true
 				}, (body, response, err) => {
@@ -347,14 +336,15 @@ auth();
 
 setInterval(auth, 15 * 1000 * 60);
 
-tg.router
-	.when('/start', new Help())
-	.when(/\/e\s?(.*)/, new Epg())
-	.when('/f', new Find())
-	.when('/c', new Channels())
-	.when('/l', new List())
-	.when('/h', new Help())
-	.when('/d :id', new Details())
-	.when('/r :id', new Related())
-	.when(/\/w\s?(.*)/, new TimeTable())
-	.otherwise(new Help());
+new Telegram.Telegram(config.botToken)
+	.router
+		.when('/start', new Help())
+		.when(/\/e\s?(.*)/, new Epg())
+		.when('/f', new Find())
+		.when('/c', new Channels())
+		.when('/l', new List())
+		.when('/h', new Help())
+		.when('/d :id', new Details())
+		.when('/r :id', new Related())
+		.when(/\/w\s?(.*)/, new TimeTable())
+		.otherwise(new WrongCommand());

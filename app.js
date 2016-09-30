@@ -89,7 +89,8 @@ class List extends Telegram.TelegramBaseController {
 						.slice(0, this.maxProgramsCount)
 						.map(this.formatScheduleInfo)
 						.join('\n');
-				return '<code>' + channel.title + '</code>\n' + (schedulesInfo || "No program info");
+				const date = moment().add(this.offset, 'days');
+				return '<code>' + channel.title + '</code> ' + formatDate(date.valueOf()) + '\n' + (schedulesInfo || "No program info");
 			} else {
 				return '<code>No schedules</code>';
 			}
@@ -320,9 +321,7 @@ class Related extends Telegram.TelegramBaseController {
 
 class TimeTable extends List {
 	get query() {
-		const nowHours = new Date().getHours();
-		const leftUntilMidnight = this.offset > 0 ? (24 - nowHours) : -nowHours;
-		const offset = (24 * this.offset + leftUntilMidnight);
+		const offset = moment().add(this.offset, 'days').startOf('day').diff(moment(), 'hours');
 		return {
 			limit: 9999,
 			from: 'now',

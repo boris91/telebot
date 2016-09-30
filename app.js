@@ -26,7 +26,11 @@ const auth = () => {
 		},
 		headers: reqHeaders,
 		json: true
-	}, body => reqHeaders[sessionHeaderKey] = body.sessionId);
+	}, body => {
+		if (body) {
+			reqHeaders[sessionHeaderKey] = body.sessionId;
+		}
+	});
 };
 
 class List extends Ctrl {
@@ -52,7 +56,7 @@ class List extends Ctrl {
 		if (this.ignoreFinishedPrograms) {
 			const now = Date.now();
 			return channels.map(channel => {
-				channel.schedules = channel.schedules.filter(schedule => schedule.end > now);
+				channel.schedules = channel.schedules ? channel.schedules.filter(schedule => schedule.end > now) : [];
 				return channel;
 			});
 		} else {
@@ -83,7 +87,7 @@ class List extends Ctrl {
 	}
 
 	onError($, err) {
-		$.sendMessage(err);
+		console.log(err);
 	}
 
 	handle($) {
@@ -205,7 +209,7 @@ class Find extends Ctrl {
 	}
 
 	onError($, err) {
-		$.sendMessage(err);
+		console.log(err);
 	}
 
 	handle($) {
@@ -273,7 +277,7 @@ class Details extends Ctrl {
 	}
 
 	onError($, err) {
-		$.sendMessage(err);
+		console.log(err);
 	}
 }
 
@@ -310,7 +314,7 @@ class Related extends Ctrl {
 	}
 
 	onError($, err) {
-		$.sendMessage(err);
+		console.log(err);
 	}
 }
 

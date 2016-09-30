@@ -7,14 +7,7 @@ const InputFile = require('telegram-node-bot/lib/api/InputFile');
 const macApiUrl = 'http://orangepl-test.noriginmedia.com/mac-api/proxy/';
 const sessionHeaderKey = 'X-Aspiro-TV-Session';
 const reqHeaders = {
-	'Accept':'*/*',
-	'Accept-Encoding':'gzip, deflate, sdch',
-	'Accept-Language':'en-US,en;q=0.8,ru;q=0.6',
-	'Cache-Control':'no-cache',
-	'Origin':'http://localhost:3000',
-	'Pragma':'no-cache',
-	'Referer':'http://localhost:3000/browser/',
-	'User-Agent':'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.116 Safari/537.36'
+	'User-Agent': 'Telegram Bot SDK'
 };
 
 const auth = () => {
@@ -248,7 +241,7 @@ class Details extends Ctrl {
 				}
 			});
 		} else {
-			$.sendMessage("The is no result for this VOD");
+			$.sendMessage("There are no details for picked content");
 		}
 	}
 
@@ -302,7 +295,7 @@ class Related extends Ctrl {
 				$.sendMessage('Program cannot have related content');
 			}
 		} else {
-			$.sendMessage('The is no result for this VoD');
+			$.sendMessage('There is no result for this VoD');
 		}
 	}
 
@@ -345,7 +338,7 @@ class TimeTable extends List {
 
 	handle($) {
 		const params = $.query[0];
-		const spaceIndex = params.lastIndexOf(" ");
+		const spaceIndex = params.lastIndexOf(' ');
 		this.id = params.substr(0, spaceIndex);
 		this.offset = params.substr(spaceIndex + 1, params.length);
 		super.handle($);

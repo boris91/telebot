@@ -4,50 +4,63 @@ const moment = require('moment');
 const config = require('./config');
 const InputFile = require('telegram-node-bot/lib/api/InputFile');
 
-let contentProvider = config.defaultContentProvider;
-let contentProviderData = config.contentProviders[contentProvider];
 const reqHeaders = {};
 Object.keys(config.contentProviders).forEach(providerName => reqHeaders[providerName] = { 'User-Agent': 'Telegram Bot SDK' });
+
+const getHeaders = ($) => reqHeaders[$.userSession.contentProvider];
+const hasProvider = ($) => !!$.userSession.contentProvider;
+const getProvider = ($) => config.contentProviders[$.userSession.contentProvider];
+const setProvider = ($, name = config.defaultContentProvider) => $.userSession.contentProvider = name;
 
 const formatDate = (timestamp, format = 'MMM DD, ddd') => {
 	return moment(timestamp).format(format);
 };
 
 const auth = () => {
-	req.get({
-		url: contentProviderData.apiUrl + contentProviderData.anonymousAuthPath,
-		query: contentProviderData.anonymousAuthQueryParams,
-		headers: reqHeaders[contentProvider],
-		json: true
-	}, body => {
-		if (body) {
-			reqHeaders[contentProvider][config.sessionHeaderKey] = body.sessionId;
-		}
+	const providers = config.contentProviders;
+	Object.keys(config.contentProviders).forEach(providerName => {
+		const provider = providers[providerName];
+		const headers = reqHeaders[providerName];
+		req.get({
+			url: provider.apiUrl + provider.anonymousAuthPath,
+			query: provider.anonymousAuthQueryParams,
+			headers,
+			json: true
+		}, body => {
+			if (body) {
+				headers[config.sessionHeaderKey] = body.sessionId;
+			}
+		});
 	});
-};
+}
 
-class Provider extends Telegram.TelegramBaseController {
+class Base extends Telegram.TelegramBaseController {
+	before(command, $) {
+		if (!hasProvider($)) {
+			setProvider($);
+		}
+		return $;
+	}
+}
+
+class Provider extends Base {
 	handle($) {
 		$.runMenu({
 			oneTimeKeyboard: true,
 			message: 'Select content provider',
 			'Orange Poland': () => {
-				contentProvider = 'orange-poland';
-				contentProviderData = config.contentProviders[contentProvider];
-				auth();
+				setProvider($, 'orange-poland');
 				$.sendMessage('Content provider set to `Orange Poland`', { parse_mode: 'Markdown' });
 			},
 			'Orange Spain': () => {
-				contentProvider = 'orange-spain';
-				contentProviderData = config.contentProviders[contentProvider];
-				auth();
+				setProvider($, 'orange-spain');
 				$.sendMessage('Content provider set to `Orange Spain`', { parse_mode: 'Markdown' });
 			}
 		});
 	}
 }
 
-class List extends Telegram.TelegramBaseController {
+class List extends Base {
 	get query() {
 		return {
 			limit: 9999,
@@ -105,9 +118,9 @@ class List extends Telegram.TelegramBaseController {
 
 	handle($) {
 		req.get({
-			url: contentProviderData.apiUrl + config.epgPath,
+			url: getProvider($).apiUrl + config.epgPath,
 			query: this.query,
-			headers: reqHeaders[contentProvider],
+			headers: getHeaders($),
 			json: true
 		}, (body, response, err) => {
 			if (!err && response.statusCode === 200) {
@@ -141,7 +154,7 @@ class Epg extends List {
 	}
 }
 
-class Help extends Telegram.TelegramBaseController {
+class Help extends Base {
 	getAvailableCommands($) {
 		const { _firstName: senderName, _lastName: senderSurname } = $.message.from;
 		return [
@@ -161,7 +174,7 @@ class WrongCommand extends Help {
 	}
 }
 
-class Find extends Telegram.TelegramBaseController {
+class Find extends Base {
 	get query() {
 		return config.searchQueryParams;
 	}
@@ -185,9 +198,9 @@ class Find extends Telegram.TelegramBaseController {
 
 	onSubmit($, { query }) {
 		req.get({
-			url: contentProviderData.apiUrl + config.searchPath,
+			url: getProvider($).apiUrl + config.searchPath,
 			query: Object.assign(this.query, { for: query }),
-			headers: reqHeaders[contentProvider],
+			headers: getHeaders($),
 			json: true
 		}, (body, response, err) => {
 			if (!err && response.statusCode === 200) {
@@ -235,14 +248,14 @@ class Find extends Telegram.TelegramBaseController {
 	}
 }
 
-class Details extends Telegram.TelegramBaseController {
+class Details extends Base {
 	handle($) {
 		const vod = $.userSession.results[$.query.id];
 
 		if (vod && vod.id) {
 			req.get({
-				url: contentProviderData.apiUrl + vod.id,
-				headers: reqHeaders[contentProvider],
+				url: getProvider($).apiUrl + vod.id,
+				headers: getHeaders($),
 				json: true
 			}, (body, response, err) => {
 				if (!err && response.statusCode === 200) {
@@ -282,15 +295,15 @@ class Details extends Telegram.TelegramBaseController {
 	}
 }
 
-class Related extends Telegram.TelegramBaseController {
+class Related extends Base {
 	handle($) {
 		const vod = $.userSession.results[$.query.id];
 
 		if (vod && vod.id) {
 			if (vod.type === 'vod') {
 				req.get({
-					url: contentProviderData.apiUrl + vod.id + '/related',
-					headers: reqHeaders[contentProvider],
+					url: getProvider($).apiUrl + vod.id + '/related',
+					headers: getHeaders($),
 					json: true
 				}, (body, response, err) => {
 					if (!err && response.statusCode === 200) {

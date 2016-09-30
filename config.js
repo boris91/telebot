@@ -27,5 +27,7 @@ module.exports = {
 		'`/d :index           `- show video details',
 		'`/r :index           `- show related videos',
 		'`/w :channel :offset `- show programs from day offset'
-	]
+	],
+
+	coverImageKey: 'APP_SLSHOW_3'
 };

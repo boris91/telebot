@@ -1,10 +1,15 @@
 const Telegram = require('telegram-node-bot');
 const req = require('tiny_request');
+const moment = require('moment');
 const config = require('./config');
 const InputFile = require('telegram-node-bot/lib/api/InputFile');
 
 const reqHeaders = {
 	'User-Agent': 'Telegram Bot SDK'
+};
+
+const formatDate = (timestamp, format = 'MMM DD, ddd') => {
+	return moment(timestamp).format(format);
 };
 
 const auth = () => {
@@ -52,12 +57,7 @@ class List extends Telegram.TelegramBaseController {
 	}
 
 	formatScheduleInfo(schedule) {
-		const startTime = new Date(schedule.start);
-		let hours = startTime.getHours();
-		hours = hours < 10 ? '0' + hours : hours;
-		let mins = startTime.getMinutes();
-		mins = mins < 10 ? '0' + mins : mins;
-		return `<b>${hours}:${mins}</b> ${schedule.title}`;
+		return `<b>${formatDate(schedule.start, 'hh:mm')}</b> ${schedule.title}`;
 	}
 
 	onSuccess($, results) {
@@ -236,17 +236,14 @@ class Details extends Telegram.TelegramBaseController {
 		const vod = results[0];
 		const title = vod.title;
 		const description = vod.description;
-		let duration = parseInt(vod.metadata.duration / 60);
-		const durHours = parseInt(duration / 60);
-		let durMins = duration % 60;
-		durMins = durMins < 10 ? '0' + durMins : durMins;
 		const year = vod.metadata.releaseYear;
-		const yearAndDuration = year && duration ? ` (${year}, ${durHours}:${durMins})` : '';
+		const duration = vod.metadata.duration;
+		const vodImgUrl = vod.images[config.coverImageKey];
+		const yearAndDuration = year && duration ? ` (${year}, ${formatDate(duration, 'hh:mm:ss')})` : '';
+		const vodData = `<b>${title}</b>${yearAndDuration}\n` + description;
 
-		let vodData = `<b>${title}</b>${yearAndDuration}\n` + description;
 		$.sendMessage(vodData || 'No occurence found', {parse_mode: 'HTML'});
 
-		const vodImgUrl = vod.images["APP_SLSHOW_3"];
 		if (vodImgUrl) {
 			let image = $.chatSession[vodImgUrl];
 			if (!image) {
@@ -300,7 +297,8 @@ class Related extends Telegram.TelegramBaseController {
 
 class TimeTable extends List {
 	get query() {
-		const leftUntilMidnight = this.offset > 0 ? (24 - new Date().getHours()) : -(new Date().getHours());
+		const nowHours = new Date().getHours();
+		const leftUntilMidnight = this.offset > 0 ? (24 - nowHours) : -nowHours;
 		const offset = (24 * this.offset + leftUntilMidnight);
 		return {
 			limit: 9999,

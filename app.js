@@ -57,19 +57,22 @@ class List extends Ctrl {
 		}
 	}
 
+	formatScheduleInfo(schedule) {
+		const startTime = new Date(schedule.start);
+		let hours = startTime.getHours();
+		hours = hours < 10 ? '0' + hours : hours;
+		let mins = startTime.getMinutes();
+		mins = mins < 10 ? '0' + mins : mins;
+		return `<b>${hours}:${mins}</b> ${schedule.title}`;
+	}
+
 	onSuccess($, results) {
 		const channels = this.sliceFinishedPrograms(results).map(channel => {
 			if (channel.schedules) {
 				const schedulesInfo = channel.schedules
 						.slice(0, this.maxProgramsCount)
-						.map(schedule => {
-							const startTime = new Date(schedule.start);
-							let hours = startTime.getHours();
-							hours = hours < 10 ? '0' + hours : hours;
-							let mins = startTime.getMinutes();
-							mins = mins < 10 ? '0' + mins : mins;
-							return `<b>${hours}:${mins}</b> ${schedule.title}`;
-						}).join('\n');
+						.map(this.formatScheduleInfo)
+						.join('\n');
 				return '<code>' + channel.title + '</code>\n' + (schedulesInfo || "No program info");
 			} else {
 				return '<code>No schedules</code>';
@@ -114,16 +117,11 @@ class Epg extends List {
 	onSuccess($, results) {
 		const title = $.query[0];
 		const channel = this.sliceFinishedPrograms(results).find(channel => channel.title === title);
-		const schedulesInfo = channel.schedules.map(schedule => {
-			const startTime = new Date(schedule.start);
-			let hours = startTime.getHours();
-			hours = hours < 10 ? '0' + hours : hours;
-			let mins = startTime.getMinutes();
-			mins = mins < 10 ? '0' + mins : mins;
-			return `<b>${hours}:${mins}</b> "${schedule.title}"`;
-		}).join('\n');
+		const schedulesInfo = channel.schedules
+				.map(this.formatScheduleInfo)
+				.join('\n');
 
-		$.sendMessage(schedulesInfo || 'No program info', { parse_mode: "HTML" });
+		$.sendMessage('<code>' + channel.title + '</code>\n' + (schedulesInfo || 'No program info'), { parse_mode: "HTML" });
 	}
 }
 

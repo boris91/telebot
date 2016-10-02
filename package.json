@@ -1,0 +1,23 @@
+{
+  "name": "telebot",
+  "version": "1.0.0",
+  "description": "Telegram bot",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/boris91/telebot.git"
+  },
+  "author": "Boris Karbanovich",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/boris91/telebot/issues"
+  },
+  "homepage": "https://github.com/boris91/telebot#readme",
+  "dependencies": {
+    "moment": "^2.15.1",
+    "telegram-node-bot": "4.0.0"
+  }
+}

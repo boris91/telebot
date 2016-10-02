@@ -4,23 +4,29 @@ const moment = require('moment');
 const config = require('./config');
 const InputFile = require('telegram-node-bot/lib/api/InputFile');
 
-const reqHeaders = {};
-Object.keys(config.contentProviders).forEach(providerName => reqHeaders[providerName] = { 'User-Agent': 'Telegram Bot SDK' });
+class Auth {
+	static getHeaders($) {
+		return Auth.headers[$.provider.name];
+	}
 
-const getHeaders = ($) => reqHeaders[$.userSession.contentProvider];
-const hasProvider = ($) => !!$.userSession.contentProvider;
-const getProvider = ($) => config.contentProviders[$.userSession.contentProvider];
-const setProvider = ($, name = config.defaultContentProvider) => $.userSession.contentProvider = name;
+	static run() {
+		Auth.providers = config.contentProviders;
+		Auth.headers = {};
+		Object.keys(Auth.providers).forEach(providerName => {
+			const providerHeaders = Auth.headers[providerName] = {};
+			Object.assign(providerHeaders, config.defaultXhrHeaders);
+		});
+		Auth.sendSessionRequests();
+		setInterval(Auth.sendSessionRequests.bind(Auth), 15 * 1000 * 60);
+	}
 
-const formatDate = (timestamp, format = 'MMM DD, ddd') => {
-	return moment(timestamp).format(format);
-};
+	static sendSessionRequests() {
+		Object.keys(Auth.providers).forEach(Auth.sendSessionRequest.bind(Auth));
+	}
 
-const auth = () => {
-	const providers = config.contentProviders;
-	Object.keys(config.contentProviders).forEach(providerName => {
-		const provider = providers[providerName];
-		const headers = reqHeaders[providerName];
+	static sendSessionRequest(providerName) {
+		const provider = Auth.providers[providerName];
+		const headers = Auth.headers[providerName];
 		req.get({
 			url: provider.apiUrl + provider.anonymousAuthPath,
 			query: provider.anonymousAuthQueryParams,
@@ -31,37 +37,89 @@ const auth = () => {
 				headers[config.sessionHeaderKey] = body.sessionId;
 			}
 		});
-	});
+	}
+}
+
+class UserSession {
+	static set(scope, key, value, callback = () => {}) {
+		scope.setUserSession(key, { value }).then(callback);
+	}
+
+	static get(scope, key, callback) {
+		scope.getUserSession(key).then(storeItem => callback(storeItem ? storeItem.value : storeItem));
+	}
 }
 
 class Base extends Telegram.TelegramBaseController {
-	before(command, $) {
-		if (!hasProvider($)) {
-			setProvider($);
+	constructor() {
+		super();
+		this._processing = false;
+		this._queue = [];
+	}
+
+	processCmd($) {
+		//TODO: implement for each controller inherited from Base
+		throw 'Not implemented';
+	}
+
+	extendScope($, props) {
+		const text = $.message.text;
+		const isCmd = text.indexOf('/') === 0;
+		const spaceIndex = text.indexOf(' ');
+		const hasQuery = isCmd && spaceIndex !== -1;
+		Object.assign($,
+				props,
+				{
+					query: [
+						(hasQuery ? text.slice(spaceIndex + 1) : text).trim()
+					]
+				});
+	}
+
+	handle($) {
+		if (this._processing) {
+			this._queue.push($);
+		} else {
+			this._processing = true;
+			UserSession.get($, 'contentProvider', this.onGetContentProvider.bind(this, $));
 		}
-		return $;
+	}
+
+	onGetContentProvider($, providerName) {
+		if (providerName) {
+			const provider = Auth.providers[providerName];
+			this.extendScope($, { provider });
+			this.processCmd($, provider);
+			this._processing = false;
+			while(this._queue.length !== 0) {
+				this.processCmd(this._queue.shift(), provider);
+			}
+		} else {
+			providerName = config.defaultContentProvider;
+			UserSession.set($, 'contentProvider', providerName, this.onGetContentProvider.bind(this, $, providerName));
+		}
 	}
 }
 
 class Provider extends Base {
-	handle($) {
+	processCmd($) {
 		$.runMenu({
 			oneTimeKeyboard: true,
 			message: 'Select content provider',
-			'Orange Poland': () => {
-				setProvider($, 'orange-poland');
-				$.sendMessage('Content provider set to `Orange Poland`', { parse_mode: 'Markdown' });
-			},
-			'Orange Spain': () => {
-				setProvider($, 'orange-spain');
-				$.sendMessage('Content provider set to `Orange Spain`', { parse_mode: 'Markdown' });
-			}
+			'Orange Poland': UserSession.set.bind(UserSession, $, 'contentProvider', 'orange-poland',
+					this.onSetContentProvider.bind(this, $, 'Orange Poland')),
+			'Orange Spain': UserSession.set.bind(UserSession, $, 'contentProvider', 'orange-spain',
+					this.onSetContentProvider.bind(this, $, 'Orange Spain'))
 		});
+	}
+
+	onSetContentProvider($, name) {
+		$.sendMessage('Content provider set to `' + name + '`', { parse_mode: 'Markdown' });
 	}
 }
 
 class List extends Base {
-	get query() {
+	get reqQuery() {
 		return {
 			limit: 9999,
 			from: 'now',
@@ -92,7 +150,7 @@ class List extends Base {
 	}
 
 	formatScheduleInfo(schedule) {
-		return `<b>${formatDate(schedule.start, 'hh:mm')}</b> ${schedule.title}`;
+		return `<b>${moment(schedule.start).format('hh:mm')}</b> ${schedule.title}`;
 	}
 
 	onSuccess($, results) {
@@ -102,8 +160,8 @@ class List extends Base {
 						.slice(0, this.maxProgramsCount)
 						.map(this.formatScheduleInfo)
 						.join('\n');
-				const date = moment().add(this.offset, 'days');
-				return '<code>' + channel.title + '</code> ' + formatDate(date.valueOf()) + '\n' + (schedulesInfo || "No program info");
+				const date = moment().add(this.offset, 'days').format('MMM DD, ddd');
+				return '<code>' + channel.title + '</code> ' + date + '\n' + (schedulesInfo || "No program info");
 			} else {
 				return '<code>No schedules</code>';
 			}
@@ -116,11 +174,11 @@ class List extends Base {
 		console.log(err);
 	}
 
-	handle($) {
+	processCmd($) {
 		req.get({
-			url: getProvider($).apiUrl + config.epgPath,
-			query: this.query,
-			headers: getHeaders($),
+			url: $.provider.apiUrl + config.epgPath,
+			query: this.reqQuery,
+			headers: Auth.getHeaders($),
 			json: true
 		}, (body, response, err) => {
 			if (!err && response.statusCode === 200) {
@@ -162,20 +220,20 @@ class Help extends Base {
 		].concat(config.commandsList).join('\n');
 	}
 
-	handle($) {
+	processCmd($) {
 		$.sendMessage(this.getAvailableCommands($), { parse_mode: 'Markdown' });
 	}
 }
 
 class WrongCommand extends Help {
-	handle($) {
+	processCmd($) {
 		$.sendMessage('`Please, do not send me not registered commands!`\n\n', { parse_mode: 'Markdown' });
 		super.handle($);
 	}
 }
 
 class Find extends Base {
-	get query() {
+	get reqQuery() {
 		return config.searchQueryParams;
 	}
 
@@ -198,9 +256,9 @@ class Find extends Base {
 
 	onSubmit($, { query }) {
 		req.get({
-			url: getProvider($).apiUrl + config.searchPath,
-			query: Object.assign(this.query, { for: query }),
-			headers: getHeaders($),
+			url: $.provider.apiUrl + config.searchPath,
+			query: Object.assign(this.reqQuery, { for: query }),
+			headers: Auth.getHeaders($),
 			json: true
 		}, (body, response, err) => {
 			if (!err && response.statusCode === 200) {
@@ -213,7 +271,7 @@ class Find extends Base {
 
 	onSuccess($, results) {
 		let message = '';
-		$.userSession.results = results
+		const searchResults = results
 				.filter(result => result.type === this.filter)
 				.map((result, index) => {
 					const info = '<b>' + index + '</b> ' + result.title + ' <code>(' + result.occurences + ')</code>\n';
@@ -224,15 +282,15 @@ class Find extends Base {
 					message += info;
 					return result;
 				});
-
-		$.sendMessage(message || 'No occurence found', { parse_mode: 'HTML' });
+		UserSession.set($, 'searchResults', searchResults,
+				() => $.sendMessage(message || 'No occurence found', { parse_mode: 'HTML' }));
 	}
 
 	onError($, err) {
 		console.log(err);
 	}
 
-	handle($) {
+	processCmd($) {
 		$.runMenu({
 			oneTimeKeyboard: true,
 			message: 'Select type of content',
@@ -249,13 +307,18 @@ class Find extends Base {
 }
 
 class Details extends Base {
-	handle($) {
-		const vod = $.userSession.results[$.query.id];
+	processCmd($) {
+		UserSession.get($, 'searchResults', this.onGetSearchResults.bind(this, $));
+	}
+
+	onGetSearchResults($, searchResults) {
+		const index = $.query[0];
+		const vod = searchResults && searchResults[index];
 
 		if (vod && vod.id) {
 			req.get({
-				url: getProvider($).apiUrl + vod.id,
-				headers: getHeaders($),
+				url: $.provider.apiUrl + vod.id,
+				headers: Auth.getHeaders($),
 				json: true
 			}, (body, response, err) => {
 				if (!err && response.statusCode === 200) {
@@ -270,23 +333,23 @@ class Details extends Base {
 	}
 
 	onSuccess($, results) {
-		const vod = results[0];
-		const title = vod.title;
-		const description = vod.description;
-		const year = vod.metadata.releaseYear;
-		const duration = vod.metadata.duration;
-		const vodImgUrl = vod.images[config.coverImageKey];
-		const yearAndDuration = year && duration ? ` (${year}, ${formatDate(duration, 'hh:mm:ss')})` : '';
-		const vodData = `<b>${title}</b>${yearAndDuration}\n` + description;
+		const vod = results && results[0];
+		if (vod) {
+			const title = vod.title;
+			const description = vod.description;
+			const year = vod.metadata.releaseYear;
+			const duration = vod.metadata.duration;
+			const vodImgUrl = vod.images[config.coverImageKey];
+			const yearAndDuration = year && duration ? ` (${year}, ${moment(duration).format('hh:mm:ss')})` : '';
+			const vodData = `<b>${title}</b>${yearAndDuration}\n` + description;
 
-		$.sendMessage(vodData || 'No occurence found', {parse_mode: 'HTML'});
+			$.sendMessage(vodData || 'No occurence found', {parse_mode: 'HTML'});
 
-		if (vodImgUrl) {
-			let image = $.chatSession[vodImgUrl];
-			if (!image) {
-				image = $.chatSession[vodImgUrl] = new InputFile(null, null, vodImgUrl, null);
+			if (vodImgUrl) {
+				$.sendPhoto(InputFile.byUrl(vodImgUrl));
 			}
-			$.sendPhoto(image);
+		} else {
+			$.sendMessage("There are no details for picked content");
 		}
 	}
 
@@ -296,14 +359,19 @@ class Details extends Base {
 }
 
 class Related extends Base {
-	handle($) {
-		const vod = $.userSession.results[$.query.id];
+	processCmd($) {
+		UserSession.get($, 'searchResults', this.onGetSearchResults.bind(this, $));
+	}
+
+	onGetSearchResults($, searchResults) {
+		const index = $.query[0];
+		const vod = searchResults && searchResults[index];
 
 		if (vod && vod.id) {
 			if (vod.type === 'vod') {
 				req.get({
-					url: getProvider($).apiUrl + vod.id + '/related',
-					headers: getHeaders($),
+					url: $.provider.apiUrl + vod.id + '/related',
+					headers: Auth.getHeaders($),
 					json: true
 				}, (body, response, err) => {
 					if (!err && response.statusCode === 200) {
@@ -313,18 +381,28 @@ class Related extends Base {
 					}
 				});
 			} else {
-				$.sendMessage('Program cannot have related content');
+				$.sendMessage('Program cannot have recommendations');
 			}
 		} else {
-			$.sendMessage('There is no result for this VoD');
+			$.sendMessage("There are no recommendations for picked content");
 		}
 	}
 
 	onSuccess($, results) {
-		const related = results
-				.map(vod => `<b>${vod.title}</b>${vod.metadata.releaseYear ? ' (' + vod.metadata.releaseYear + ')' : ''}`)
-				.join('\n');
-		$.sendMessage('<code>' + $.userSession.results[$.query.id].title + '</code> recommendataions\n' + related || 'No related found', {parse_mode: 'HTML'});
+		UserSession.get($, 'searchResults', this.onGetSearchResultsAfterSuccess.bind(this, $, results));
+	}
+
+	onGetSearchResultsAfterSuccess($, results, searchResults) {
+		const index = $.query[0];
+		const vod = searchResults && searchResults[index];
+		if (vod) {
+			const related = results
+					.map(relVod => `<b>${relVod.title}</b>${relVod.metadata.releaseYear ? ' (' + relVod.metadata.releaseYear + ')' : ''}`)
+					.join('\n');
+			$.sendMessage('<code>' + vod.title + '</code> recommendataions\n' + related || 'No related found', { parse_mode: 'HTML' });
+		} else {
+			$.sendMessage('There is no result for this VoD', { parse_mode: 'HTML' });
+		}
 	}
 
 	onError($, err) {
@@ -333,7 +411,7 @@ class Related extends Base {
 }
 
 class TimeTable extends List {
-	get query() {
+	get reqQuery() {
 		const offset = moment().add(this.offset, 'days').startOf('day').diff(moment(), 'hours');
 		return {
 			limit: 9999,
@@ -356,29 +434,27 @@ class TimeTable extends List {
 		super.onSuccess($, results.filter(channel => channel.title == this.id));
 	}
 
-	handle($) {
+	processCmd($) {
 		const params = $.query[0];
 		const spaceIndex = params.lastIndexOf(' ');
 		this.id = params.substr(0, spaceIndex);
 		this.offset = params.substr(spaceIndex + 1, params.length);
-		super.handle($);
+		super.processCmd($);
 	}
 }
 
-auth();
+Auth.run();
 
-setInterval(auth, 15 * 1000 * 60);
-
-new Telegram.Telegram(config.botToken)
+new Telegram.Telegram(config.botToken, { workers: 1 })
 	.router
-		.when('/start', new Help())
-		.when(/\/e\s?(.*)/, new Epg())
-		.when('/f', new Find())
-		.when('/c', new Channels())
-		.when('/l', new List())
-		.when('/h', new Help())
-		.when('/d :id', new Details())
-		.when('/r :id', new Related())
-		.when('/p', new Provider())
-		.when(/\/w\s?(.*)/, new TimeTable())
+		.when(new Telegram.TextCommand('/start'), new Help())
+		.when(new Telegram.TextCommand('/e'), new Epg())
+		.when(new Telegram.TextCommand('/f'), new Find())
+		.when(new Telegram.TextCommand('/c'), new Channels())
+		.when(new Telegram.TextCommand('/l'), new List())
+		.when(new Telegram.TextCommand('/h'), new Help())
+		.when(new Telegram.TextCommand('/d'), new Details())
+		.when(new Telegram.TextCommand('/r'), new Related())
+		.when(new Telegram.TextCommand('/p'), new Provider())
+		.when(new Telegram.TextCommand('/w'), new TimeTable())
 		.otherwise(new WrongCommand());

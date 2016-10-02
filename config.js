@@ -5,6 +5,7 @@ module.exports = {
 
 	contentProviders: {
 		'orange-poland': {
+			name: 'orange-poland',
 			apiUrl: 'http://orangepl-test.noriginmedia.com/mac-api/proxy/',
 			anonymousAuthPath: 'orange-opl/anonymous',
 			anonymousAuthQueryParams: {
@@ -13,6 +14,7 @@ module.exports = {
 			}
 		},
 		'orange-spain': {
+			name: 'orange-spain',
 			apiUrl: 'http://orange-test.noriginmedia.com/mac-api/proxy/',
 			anonymousAuthPath: 'orange-es/anonymous',
 			anonymousAuthQueryParams: {
@@ -20,6 +22,10 @@ module.exports = {
 				appVersion: '3.3'
 			}
 		}
+	},
+
+	defaultXhrHeaders: {
+		'User-Agent': 'Telegram Bot SDK'
 	},
 
 	sessionHeaderKey: 'X-Aspiro-TV-Session',

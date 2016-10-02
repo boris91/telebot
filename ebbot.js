@@ -14,15 +14,17 @@ class EBbot {
 		const router = telebot.router;
 		const routes = config.routes.right;
 
+		const OtherwiseCtrl = require('./controllers/' + config.routes.wrong);
+		const otherwiseCtrl = new OtherwiseCtrl();
+		router.otherwise(otherwiseCtrl);
+
 		Object.keys(routes).forEach(command => {
 			const ctrlPath = './controllers/' + routes[command];
 			const Ctrl = require(ctrlPath);
-			const textCommand = new Telegram.TextCommand('/' + command);
-			router.when(textCommand, new Ctrl());
+			const commandTextPattern = '/' + command;
+			const textCommand = new Telegram.TextCommand(commandTextPattern);
+			router.when(textCommand, new Ctrl(commandTextPattern, otherwiseCtrl));
 		});
-
-		const OtherwiseCtrl = require('./controllers/' + config.routes.wrong);
-		router.otherwise(new OtherwiseCtrl());
 	}
 }
 

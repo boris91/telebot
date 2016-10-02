@@ -5,8 +5,10 @@ const Auth = require('../auth');
 const UserSession = require('../user-session');
 
 class Base extends Telegram.TelegramBaseController {
-	constructor() {
+	constructor(cmdTxtPattern, otherwiseCtrl) {
 		super();
+		this._cmdTxtPattern = cmdTxtPattern;
+		this._otherwiseCtrl = otherwiseCtrl;
 		this._processing = false;
 		this._queue = [];
 	}
@@ -31,11 +33,16 @@ class Base extends Telegram.TelegramBaseController {
 	}
 
 	handle($) {
-		if (this._processing) {
-			this._queue.push($);
-		} else {
-			this._processing = true;
-			UserSession.get($, 'contentProvider', this.onGetContentProvider.bind(this, $));
+		const exactCmd = !this._cmdTxtPattern || $.message.text.split(' ')[0] === this._cmdTxtPattern;
+		if (exactCmd) {
+			if (this._processing) {
+				this._queue.push($);
+			} else {
+				this._processing = true;
+				UserSession.get($, 'contentProvider', this.onGetContentProvider.bind(this, $));
+			}
+		} else if (this._otherwiseCtrl){
+			this._otherwiseCtrl.handle($);
 		}
 	}
 

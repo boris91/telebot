@@ -1,5 +1,6 @@
 module.exports = {
 	botToken: '252731600:AAHEfZxF0BA1_gyC4k3TfXd3AkaLcLHhOgs',
+	workersCount: 1,
 
 	defaultContentProvider: 'orange-poland',
 
@@ -37,6 +38,22 @@ module.exports = {
 
 	epgPath: 'epg',
 	searchPath: 'search',
+
+	routes: {
+		right: {
+			'start': 'help',
+			'h': 'help',
+			'c': 'channels',
+			'e': 'epg',
+			'l': 'list',
+			'f': 'find',
+			'd': 'details',
+			'r': 'related',
+			'p': 'provider',
+			'w': 'time-table'
+		},
+		wrong: 'wrong'
+	},
 
 	commandsList: [
 		'`/h                  `- show commands list',
